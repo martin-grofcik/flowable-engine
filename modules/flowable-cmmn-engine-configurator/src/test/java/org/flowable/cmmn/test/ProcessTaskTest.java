@@ -142,6 +142,45 @@ public class ProcessTaskTest extends AbstractProcessEngineIntegrationTest {
     }
 
     @Test
+    @CmmnDeployment(resources = "org/flowable/cmmn/test/ProcessTaskTest.testOneCallActivityProcessBlocking.cmmn")
+    public void deleteWithRelatedData_deleteChildProcessAndTask() {
+            Deployment deployment = processEngine.getRepositoryService().createDeployment()
+                    .addClasspathResource("org/flowable/cmmn/test/oneCallActivityProcess.bpmn20.xml")
+                    .addClasspathResource("org/flowable/cmmn/test/oneTaskProcess.bpmn20.xml")
+                    .deploy();
+
+            try {
+                CaseInstance caseInstance = cmmnRuntimeService.createCaseInstanceBuilder()
+                        .caseDefinitionKey("myCase")
+                        .start();
+                List<PlanItemInstance> planItemInstances = cmmnRuntimeService.createPlanItemInstanceQuery()
+                        .caseInstanceId(caseInstance.getId())
+                        .planItemInstanceState(PlanItemInstanceState.ACTIVE)
+                        .list();
+
+                assertThat(planItemInstances).hasSize(1);
+                cmmnRuntimeService.triggerPlanItemInstance(planItemInstances.get(0).getId());
+
+                Task task = cmmnTaskService.createTaskQuery().caseInstanceIdWithChildren(caseInstance.getId()).singleResult();
+                assertThat(task.getId()).isNotNull();
+                ProcessInstance oneTaskProcess = processEngine.getRuntimeService().createProcessInstanceQuery().processInstanceId(task.getProcessInstanceId())
+                        .singleResult();
+                ProcessInstance calledProcess = processEngine.getRuntimeService().createProcessInstanceQuery()
+                        .subProcessInstanceId(task.getProcessInstanceId()).singleResult();
+
+                cmmnRuntimeService.terminateCaseInstance(caseInstance.getId());
+                cmmnHistoryService.createHistoricCaseInstanceQuery().caseInstanceId(caseInstance.getId()).deleteWithRelatedData();
+
+                assertThat(processEngine.getHistoryService().createHistoricProcessInstanceQuery().processInstanceId(oneTaskProcess.getId()).count()).isZero();
+                assertThat(processEngine.getHistoryService().createHistoricProcessInstanceQuery().processInstanceId(calledProcess.getId()).count()).isZero();
+                assertThat(processEngine.getHistoryService().createHistoricTaskInstanceQuery().taskId(task.getId()).count()).isZero();
+            } finally {
+                processEngine.getRepositoryService().deleteDeployment(deployment.getId());
+            }
+
+    }
+
+    @Test
     @CmmnDeployment
     public void testOneCallActivityProcessBlocking() {
         Deployment deployment = processEngine.getRepositoryService().createDeployment()
